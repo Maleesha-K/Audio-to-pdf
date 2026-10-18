@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Audio to PDF · Visual lecture studio</title>
+  <link rel="stylesheet" href="/ui/style.css?v=5">
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand"><span class="brand-icon">↗</span><span><b>Audio to PDF</b><small>Visual lecture studio</small></span></div>
+      <div class="header-right"><span class="local-badge"><i></i> Local MVP</span><button id="uploadToggle" class="subtle-button">New lesson</button></div>
+    </header>
+
+    <aside class="sidebar">
+      <div class="sidebar-title"><span>YOUR LESSONS</span><button id="refreshLessons" aria-label="Refresh lessons" title="Refresh lessons">↻</button></div>
+      <div id="lessonList" class="lesson-list"><p class="empty-list">No lessons yet</p></div>
+      <div class="sidebar-footer">Your PDFs and audio stay on this computer. Review uncertain marks before sharing.</div>
+    </aside>
+
+    <main class="main">
+      <section id="welcome" class="welcome panel">
+        <div class="eyebrow">FROM AUDIO TO VISUAL TEACHING</div>
+        <h1>Follow the explanation on the original page.</h1>
+        <p>Upload a lecture PDF and audio. The player keeps each page still while thin underlines and orange boxes appear with the narration.</p>
+        <div class="feature-row"><span>Exact uploaded pages</span><span>Editable timeline</span><span>Persistent marks</span><span>Review uncertain matches</span></div>
+        <button id="welcomeUpload" class="primary-button">Create a lesson <span>→</span></button>
+      </section>
+
+      <section id="playerSection" class="player-section hidden">
+        <div class="lesson-heading"><div><div class="eyebrow">NOW LEARNING</div><h1 id="lessonTitle">Lesson</h1><p id="lessonMeta"></p></div><div class="export-controls"><button id="rebuildAlignment" class="subtle-button">Rebuild PDF grounding</button><button id="rebuildFocus" class="subtle-button">Build equation focus</button><button id="exportJson" class="subtle-button">Export JSON</button><button id="exportMp4" class="primary-button">Compact MP4</button></div></div>
+        <div id="exportStatus" class="export-status hidden"></div>
+        <div class="content-grid">
+          <div id="viewerColumn" class="viewer-column">
+            <div class="viewer-top"><div><button id="prevPage" class="page-nav" aria-label="Previous lesson page">‹</button><select id="pageSelect" aria-label="Lesson page"></select><button id="nextPage" class="page-nav" aria-label="Next lesson page">›</button><button id="resumeSync" class="page-nav resume hidden">Resume audio page</button><span id="pagePill" class="page-pill">Page 1</span><strong id="pageTitle"></strong></div><span id="confidencePill" class="confidence-pill">Waiting</span></div>
+            <div id="stage" class="stage">
+              <img id="pageImage" alt="Current uploaded PDF page">
+              <img id="analogyImage" alt="Illustration for the current analogy" class="hidden">
+              <svg id="annotationLayer" class="annotation-layer" viewBox="0 0 1000 1000" preserveAspectRatio="none" aria-label="Timed annotations"></svg>
+              <div id="editHint" class="edit-hint hidden">Drag across the page to place the selected annotation</div>
+            </div>
+            <div class="playback panel"><div class="playback-main"><button id="skipBack" class="seek-button" type="button" aria-label="Backward 5 seconds" title="Backward 5 seconds (←)">−5s</button><audio id="audioPlayer" controls preload="auto"></audio><button id="skipForward" class="seek-button" type="button" aria-label="Forward 5 seconds" title="Forward 5 seconds (→)">+5s</button><button id="fullscreenToggle" class="seek-button fullscreen-button" type="button" aria-label="Toggle full screen" title="Full screen (F)">⛶ Full screen</button></div><div class="playback-secondary"><span id="nowTime">00:00</span><span id="currentConcept">Select a lesson to begin</span><label>Speed <select id="speed"><option value="0.8">0.8×</option><option value="1" selected>1×</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option></select></label></div></div>
+            <div class="viewer-note">PDF marks and inserted analogy pages remain saved in the lesson and reappear on return visits.</div>
+          </div>
+
+          <aside class="timeline panel">
+            <div class="timeline-header"><div><div class="eyebrow">TIMED POINTS</div><h2>Lecture timeline</h2></div><span id="pointCount">0 points</span></div>
+            <div id="reviewSummary" class="review-summary">Processing accuracy signals…</div>
+            <div id="pointList" class="point-list"></div>
+            <div id="editor" class="editor hidden">
+              <div class="editor-head"><strong>Correct this point</strong><button id="closeEditor" aria-label="Close editor">×</button></div>
+              <label>Page <input id="editPage" type="number" min="1"></label>
+              <label>Document block <select id="editBlock"></select></label>
+              <label>Action <select id="editAction"><option value="hold">Hold page</option><option value="underline">Thin underline</option><option value="box">Orange box</option></select></label>
+              <label>Concept <input id="editConcept" type="text"></label>
+              <div class="editor-buttons"><button id="drawRegion" class="subtle-button">Draw region</button><button id="saveEdit" class="primary-button">Save correction</button></div>
+              <div id="regionStatus" class="region-status">Select a visual action, then draw its target on the page.</div>
+              <div id="focusEditor" class="focus-editor hidden"><strong>Word-timed equation box</strong><label>Cue <select id="focusSelect"></select></label><label>Start (seconds) <input id="focusStart" type="number" step="0.01" min="0"></label><label>End (seconds) <input id="focusEnd" type="number" step="0.01" min="0"></label><label>Term <select id="focusTerm"></select></label><div class="editor-buttons"><button id="drawFocusRegion" class="subtle-button">Draw focus box</button><button id="saveFocus" class="primary-button">Save cue</button></div><div id="focusStatus" class="region-status"></div></div>
+            </div>
+            <div id="whiteboardEditor" class="editor hidden">
+              <div class="editor-head"><strong>Edit analogy page</strong><button id="closeWhiteboardEditor" aria-label="Close analogy editor">×</button></div>
+              <label>Title <input id="whiteboardTitle" type="text" maxlength="100"></label>
+              <p class="editor-description">Adjust the saved drawing steps and their timing. The illustration remains a separate background.</p>
+              <p id="whiteboardEvidence" class="editor-description"></p>
+              <div id="whiteboardSteps" class="whiteboard-steps"></div>
+              <div class="editor-buttons"><select id="newWhiteboardStep" aria-label="New drawing step"><option value="text">Text</option><option value="point">Point</option><option value="arrow">Arrow</option><option value="line">Line</option><option value="rectangle">Rectangle</option><option value="ellipse">Ellipse</option></select><button id="addWhiteboardStep" class="subtle-button">Add step</button></div>
+              <label class="approval-label"><input id="approveWhiteboard" type="checkbox"> I reviewed this analogy</label>
+              <button id="removeAnalogyImage" class="subtle-button hidden">Remove illustration</button>
+              <button id="saveWhiteboard" class="primary-button">Save analogy</button>
+              <div id="whiteboardStatus" class="region-status"></div>
+            </div>
+          </aside>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div id="uploadDialog" class="dialog hidden" role="dialog" aria-modal="true" aria-labelledby="dialogTitle">
+    <div class="dialog-card"><button id="closeDialog" class="dialog-close" aria-label="Close">×</button><div class="eyebrow">NEW LESSON</div><h2 id="dialogTitle">Add your source material</h2><p>The first run downloads a local speech model and may take a few minutes. Later lessons reuse it.</p>
+      <form id="uploadForm"><label>Lecture PDF<input id="pdfInput" name="pdf" type="file" accept="application/pdf,.pdf" required></label><label>Audio explanation<input id="audioInput" name="audio" type="file" accept="audio/*,.m4a,.mp3,.wav,.ogg,.flac,.mp4" required></label><details><summary>Already have a timestamped transcript?</summary><label>Transcript JSON (optional)<input name="transcript" type="file" accept=".json,application/json"></label><small>Use a JSON object with a <code>segments</code> array. This skips transcription.</small></details><button class="primary-button" type="submit">Create lesson <span>→</span></button></form>
+      <div id="uploadStatus" class="upload-status hidden"></div>
+    </div>
+  </div>
+  <script src="/ui/app.js?v=11" defer></script>
+</body>
+</html>

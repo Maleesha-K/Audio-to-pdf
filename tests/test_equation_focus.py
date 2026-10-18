@@ -1,0 +1,114 @@
+"""Hand-labeled cues from the supplied optimization narration and slide deck."""
+import json
+import shutil
+import statistics
+import tempfile
+import unittest
+from pathlib import Path
+from unittest import mock
+
+from backend.equation_focus import build_focus, active_focus
+from backend.gemini_budget import GeminiBudget, MAX_CALLS
+from backend.video_export import FrameRenderer, lesson_hash
+
+
+ROOT = Path(__file__).resolve().parents[1]
+SAMPLE = ROOT / 'data' / 'lessons' / 'sample-optimization'
+# (spoken word onset, PDF page, target). Labels were read from transcript.json
+# and checked against the source slide, independently of the focus generator.
+LABELS = [
+    (450.80,4,'sum'),(451.14,4,'z1'),(452.44,4,'d1'),(453.68,4,'z2'),(454.54,4,'d2'),
+    (661.84,10,'lhs'),(664.34,10,'old_weight'),(667.44,10,'alpha'),
+    (668.54,10,'derivative'),(670.92,10,'derivative'),(674.38,10,'lhs'),
+    (675.62,10,'old_weight'),(676.68,10,'alpha'),(678.12,10,'derivative'),
+    (683.50,10,'alpha'),(698.10,10,'alpha'),(877.44,22,'beta2'),
+    (927.46,23,'beta1'),(929.36,23,'beta2'),(931.90,23,'epsilon'),
+    (976.42,24,'alpha'),
+]
+
+
+class EquationFocusTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.lesson=json.loads((SAMPLE/'lesson.json').read_text(encoding='utf-8'))
+        cls.events=build_focus(cls.lesson,SAMPLE/'source.pdf')
+
+    def test_hand_labeled_cues(self):
+        matched=[]
+        for onset,page,term in LABELS:
+            candidates=[event for event in self.events if event['page']==page and
+                        abs(event['start']-onset)<=.4]
+            if candidates:
+                best=min(candidates,key=lambda event:abs(event['start']-onset))
+                matched.append((best['term_id']==term,abs(best['start']-onset)))
+        coverage=len(matched)/len(LABELS)
+        precision=sum(correct for correct,_ in matched)/len(matched) if matched else 0
+        onset_error=statistics.median(error for _,error in matched) if matched else 999
+        self.assertGreaterEqual(coverage,.8)
+        self.assertGreaterEqual(precision,.9)
+        self.assertLessEqual(onset_error,.4)
+        self.assertGreaterEqual(len(LABELS),20)
+
+    def test_one_box_and_export_invalidation(self):
+        self.lesson['equation_focus']=self.events
+        cue=active_focus(self.lesson,667.50,'pdf-10')
+        self.assertEqual(cue['term_id'],'alpha')
+        self.assertIsNone(active_focus(self.lesson,667.50,'pdf-9'))
+        alpha_center=cue['region'][0]+cue['region'][2]/2
+        self.assertTrue(.20<alpha_center<.26)
+        renderer=FrameRenderer(self.lesson,SAMPLE)
+        self.assertEqual(renderer.frame(667.50).size,(1280,720))
+        before=lesson_hash(self.lesson)
+        self.events[0]['region']=[.1,.2,.1,.1]
+        self.assertNotEqual(before,lesson_hash(self.lesson))
+
+    def test_budget_cap_and_quota_stop(self):
+        with tempfile.TemporaryDirectory(dir=ROOT/'tests') as directory:
+            budget=GeminiBudget(Path(directory))
+            calls=[]
+            for _ in range(MAX_CALLS+3):
+                budget.run(lambda: calls.append(1) or 'ok')
+            self.assertEqual(len(calls),8)
+            self.assertEqual(GeminiBudget(Path(directory)).data['calls'],8)
+        with tempfile.TemporaryDirectory(dir=ROOT/'tests') as directory:
+            budget=GeminiBudget(Path(directory))
+            def quota(): raise RuntimeError('429 RESOURCE_EXHAUSTED')
+            self.assertIsNone(budget.run(quota))
+            self.assertTrue(budget.data['quota_exhausted'])
+            self.assertIsNone(budget.run(lambda: 'should not run'))
+            self.assertEqual(budget.data['calls'],1)
+
+    def test_correction_survives_local_rebuild(self):
+        import importlib
+        api=importlib.import_module('backend.app')
+        with tempfile.TemporaryDirectory(dir=ROOT/'tests') as directory:
+            root=Path(directory); target=root/'sample-optimization'; target.mkdir()
+            for name in ('lesson.json','source.pdf','transcript.json'):
+                shutil.copyfile(SAMPLE/name,target/name)
+            with mock.patch.object(api,'LESSONS',root):
+                event=api._load_lesson('sample-optimization')['equation_focus'][0]
+                changed=api.edit_equation_focus('sample-optimization',event['id'],
+                    api.EquationFocusEdit(start=event['start']+.7,end=event['end']+.7,term_id='z1'))
+                self.assertTrue(changed['edited'])
+                result=api.rebuild_equation_focus('sample-optimization')
+                saved=[row for row in result['events'] if row['id']==event['id']]
+                self.assertEqual(len(saved),1)
+                self.assertEqual(saved[0]['term_id'],'z1')
+                self.assertAlmostEqual(saved[0]['start'],event['start']+.7,places=2)
+                self.assertEqual(result['preserved_corrections'],1)
+
+    def test_old_lesson_opens_without_focus(self):
+        import importlib
+        api=importlib.import_module('backend.app')
+        with tempfile.TemporaryDirectory(dir=ROOT/'tests') as directory:
+            root=Path(directory); target=root/'legacy'; target.mkdir()
+            old=json.loads((SAMPLE/'lesson.json').read_text(encoding='utf-8'))
+            old['id']='legacy'; old.pop('equation_focus',None)
+            (target/'lesson.json').write_text(json.dumps(old,ensure_ascii=False),encoding='utf-8')
+            with mock.patch.object(api,'LESSONS',root):
+                loaded=api._load_lesson('legacy')
+                self.assertEqual(loaded['equation_focus'],[])
+                self.assertEqual(len(loaded['points']),len(old['points']))
+
+
+if __name__ == '__main__': unittest.main()
