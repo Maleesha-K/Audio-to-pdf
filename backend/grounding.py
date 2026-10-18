@@ -1,12 +1,16 @@
 """Local document structure and conservative, lecture-wide audio grounding."""
 from __future__ import annotations
 
+import hashlib
+import json
 import math
 import os
 import re
 from collections import Counter, defaultdict
 from functools import lru_cache
 from pathlib import Path
+
+from .gemini_budget import GeminiBudget
 
 COMMON = set("a an and are as at be by can do for from has have in into is it of on or that the their then there these this to was were what when where which with you your we our they them about like just very really now okay right so next first second third".split())
 NUMBER_WORDS = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6,
@@ -451,7 +455,100 @@ def _word_region(text: str, page: dict, block: dict) -> tuple[list[float] | None
     return [box[0],round(min(.99,box[1]+box[3]+.003),5),box[2],.006], min(1.,unique/max(1,min(3,len(block_toks))))
 
 
-def align_document(points: list[dict], pages: list[dict], model_dir: Path | None = None) -> list[dict]:
+def disambiguate_with_gemini(
+    transcript_text: str,
+    candidate_blocks: list[dict],
+    page_title: str = "",
+    budget: GeminiBudget | None = None,
+) -> dict | None:
+    """Resolve ambiguous slide blocks with Gemini 2.5 Flash under deterministic local guardrails."""
+    key = os.getenv("GEMINI_API_KEY")
+    if not key or not candidate_blocks or not transcript_text.strip():
+        return None
+    valid_blocks = [b for b in candidate_blocks if b.get("id") and b.get("kind") != "unreadable" and b.get("text", "").strip()]
+    if not valid_blocks:
+        return None
+    budget = budget or GeminiBudget(None)
+    valid_ids = {b["id"] for b in valid_blocks}
+    lines = [f"- {b['id']} ({b.get('kind', 'paragraph')}): {b['text'].strip()[:220]}" for b in valid_blocks[:4]]
+    prompt = (
+        "You are an academic lecture grounding verifier. A speaker is explaining a slide.\n"
+        "Select the single candidate block ID on the slide that the spoken passage directly explains or paraphrases.\n"
+        "If the passage is an off-slide remark, transition, or does not clearly correspond to any candidate block, return 'none'.\n\n"
+        f"Slide title: {page_title.strip()[:120]}\n"
+        f"Spoken narration: {transcript_text.strip()[:450]}\n\n"
+        "Candidate blocks on this slide (in top-to-bottom reading order):\n"
+        + "\n".join(lines)
+    )
+    schema = {
+        "type": "OBJECT",
+        "properties": {
+            "chosen_block_id": {"type": "STRING"},
+            "confidence": {"type": "NUMBER"},
+            "reasoning": {"type": "STRING"},
+        },
+        "required": ["chosen_block_id", "confidence", "reasoning"],
+    }
+    model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+    digest = hashlib.sha256((model + "\ngrounding-v1\n" + prompt).encode("utf-8")).hexdigest()
+
+    def _validate(raw: dict) -> dict | None:
+        if not isinstance(raw, dict):
+            return None
+        chosen = str(raw.get("chosen_block_id", "")).strip()
+        try:
+            conf = round(float(raw.get("confidence", 0.0)), 3)
+        except (TypeError, ValueError):
+            return None
+        reason = str(raw.get("reasoning", "")).strip()[:240]
+        if chosen.lower() == "none":
+            return {"chosen_block_id": "none", "confidence": conf, "reasoning": reason, "status": "abstained"}
+        # Deterministic guardrail: reject any hallucinated block ID or low-confidence guess.
+        if chosen not in valid_ids or conf < 0.70:
+            return None
+        return {"chosen_block_id": chosen, "confidence": conf, "reasoning": reason, "status": "accepted"}
+
+    cached = budget.cached_plan(digest)
+    if cached is not None:
+        try:
+            return _validate(json.loads(cached))
+        except Exception:
+            return None
+
+    try:
+        from google import genai
+        from google.genai import types
+
+        def _call():
+            client = genai.Client(api_key=key)
+            return client.models.generate_content(
+                model=model,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    response_schema=schema,
+                    temperature=0.1,
+                ),
+            )
+
+        response = budget.run(_call)
+        if response is None or not getattr(response, "text", None):
+            return None
+        parsed = json.loads(response.text)
+        validated = _validate(parsed)
+        if validated is not None:
+            budget.save_plan(digest, response.text)
+        return validated
+    except Exception:
+        return None
+
+
+def align_document(
+    points: list[dict],
+    pages: list[dict],
+    model_dir: Path | None = None,
+    budget: GeminiBudget | None = None,
+) -> list[dict]:
     """Align globally by page, then locally by block; abstain on weak evidence."""
     if not points or not pages:
         return []
@@ -620,25 +717,76 @@ def align_document(points: list[dict], pages: list[dict], model_dir: Path | None
         # Semantic similarity alone is insufficient to draw a mark.
         supported=anchored or (lexical>=.16 and score>=.18 and score-next_score>=.025)
         if block["kind"] == "unreadable": supported=False
+        gemini_pick = None
+        gemini_resolved = False
+        if (not anchored and not supported and len(candidates) >= 2
+                and (budget is not None or bool(os.getenv("GEMINI_API_KEY")))
+                and (score - next_score < .04 or lexical < .22)):
+            forward_candidates = [
+                b for _, b, j in sorted(candidates, key=lambda row: row[2])
+                if j >= max(0, prev_idx) and b.get("kind") != "unreadable"
+            ][:4]
+            if len(forward_candidates) >= 2:
+                gemini_pick = disambiguate_with_gemini(
+                    point["text"],
+                    forward_candidates,
+                    page_title=page.get("title", ""),
+                    budget=budget,
+                )
+                if gemini_pick and gemini_pick.get("status") == "accepted":
+                    chosen_id = gemini_pick["chosen_block_id"]
+                    if chosen_id in index and blocks[index[chosen_id]]["page"] == page_num:
+                        sel_idx = index[chosen_id]
+                        selected_blocks[i] = sel_idx
+                        block = blocks[sel_idx]
+                        score, lexical, sem = scores[i][sel_idx]
+                        supported = True
+                        gemini_resolved = True
         kind = block["kind"]
         region=None;action="hold"
         if supported and kind == "equation":
             # Garbled symbols must be reviewed, never given an automatic box.
-            if "(cid:" not in block["text"] and lexical>=.24:
+            if "(cid:" not in block["text"] and (lexical>=.24 or gemini_resolved):
                 action="box";region=block["region"]
         elif supported and kind == "figure":
             action="box";region=block["region"]
         elif supported:
             region,word_strength=_word_region(point["text"],page,block)
-            if region and (anchored or lexical>=.22): action="underline"
+            if region is None and gemini_resolved:
+                bx, by, bw, bh = block["region"]
+                region = [
+                    round(bx, 5),
+                    round(min(.99, by + min(bh, .032) + .003), 5),
+                    round(min(max(bw, .04), .38), 5),
+                    .006,
+                ]
+            if region and (anchored or lexical>=.22 or gemini_resolved): action="underline"
         quality=block.get("source_quality","embedded")
-        if quality=="ocr" and action=="underline" and lexical<.34: action="hold";region=None
+        if quality=="ocr" and action=="underline" and lexical<.34 and not gemini_resolved: action="hold";region=None
         confidence=round(min(.98, (.84 if anchored else .32+score*.75+max(0.,score-next_score)*.5)),3)
+        if gemini_resolved and gemini_pick:
+            confidence = round(min(.92, max(confidence, .58 + .25 * float(gemini_pick.get("confidence", .75)))), 3)
         reviewed=action=="hold" or (not anchored and confidence<.55)
         if reviewed: action="hold";region=None
         has_eq = any(v.get("kind") == "equation" for v in page.get("visuals", [])) or any(b["kind"] == "equation" for b in page.get("blocks", []))
         spoken_eq = has_eq and bool(re.search(r"\b(formula|equation|partial derivative|new weight|old weight|learning rate|alpha|beta|epsilon|sigma|sum of)\b", point["text"], re.I))
         ref_kind = "equation" if (kind == "equation" or spoken_eq) else "source" if action != "hold" else "none"
+        matcher_name = (
+            "gemini-disambiguated" if gemini_resolved
+            else "gemini-abstained" if (gemini_pick and gemini_pick.get("status") == "abstained")
+            else "local-semantic" if semantic is not None
+            else "local-lexical"
+        )
+        evidence_payload = {
+            "block_score": round(score, 3),
+            "lexical": round(lexical, 3),
+            "semantic": round(sem, 3),
+            "margin": round(score - next_score, 3),
+            "anchor": bool(anchored),
+            "matcher": matcher_name,
+        }
+        if gemini_pick is not None:
+            evidence_payload["gemini_disambiguation"] = gemini_pick
         result.append({"id":point.get("id",f"p{i+1:04d}"),"start":point["start"],"end":point["end"],
                        "text":point["text"],"words":point.get("words",[]),
                        "topic":page["title"],"concept":" ".join(point["text"].split()[:12]),
@@ -646,8 +794,5 @@ def align_document(points: list[dict], pages: list[dict], model_dir: Path | None
                        "page":page_num,"page_id":f"pdf-{page_num}","block_id":block["id"] if supported else None,
                        "parent_block_id":block.get("parent_id") if supported else None,
                        "action":action,"region":region,"sketch":None,"confidence":confidence,
-                       "needs_review":reviewed,"evidence":{"block_score":round(score,3),
-                       "lexical":round(lexical,3),"semantic":round(sem,3),
-                       "margin":round(score-next_score,3),"anchor":bool(anchored),
-                       "matcher":"local-semantic" if semantic is not None else "local-lexical"}})
+                       "needs_review":reviewed,"evidence":evidence_payload})
     return result

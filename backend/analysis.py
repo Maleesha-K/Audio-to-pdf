@@ -307,7 +307,8 @@ def process(pdf_path: Path, audio_path: Path, lesson_dir: Path, model_dir: Path,
     pages = analyze_pdf(pdf_path, lesson_dir / "pages")
     transcript = supplied_transcript or transcribe(audio_path, model_dir)
     (lesson_dir / "transcript.json").write_text(json.dumps(transcript, ensure_ascii=False, indent=2), encoding="utf-8")
-    points = align_document(make_points(transcript["segments"]), pages, model_dir)
+    from .gemini_budget import GeminiBudget
+    points = align_document(make_points(transcript["segments"]), pages, model_dir, budget=GeminiBudget(lesson_dir))
     # Existing whiteboards remain readable; new lessons concentrate on source grounding.
     lesson_pages = [{"id":f"pdf-{p['number']}","kind":"pdf","source_page":p["number"],
                      "title":p["title"],"image":p["image"],"width":p["width"],"height":p["height"]}

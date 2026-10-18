@@ -125,7 +125,8 @@ def _run_alignment_rebuild(lesson_id: str) -> None:
         lesson_dir = _lesson_dir(lesson_id)
         pages = analyze_pdf(lesson_dir / "source.pdf", lesson_dir / "pages")
         transcript = json.loads((lesson_dir / "transcript.json").read_text(encoding="utf-8"))
-        generated = align_document(make_points(transcript.get("segments",[])), pages, MODELS)
+        from .gemini_budget import GeminiBudget
+        generated = align_document(make_points(transcript.get("segments",[])), pages, MODELS, budget=GeminiBudget(lesson_dir))
         updated = _merge_rebuilt_points(lesson, generated, pages)
         lesson["pages"] = pages
         lesson["points"] = updated
