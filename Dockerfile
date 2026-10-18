@@ -24,9 +24,9 @@ COPY backend/ ./backend/
 COPY frontend/ ./frontend/
 COPY scripts/ ./scripts/
 
-# Copy pre-packaged flagship demo lesson into image
-COPY data/sample-optimization-template/ ./data/lessons/sample-optimization/
+# Copy pre-packaged demo lessons into image
 COPY data/sample-optimization-template/ ./data/sample-optimization-template/
+COPY data/lessons/ ./data/lessons/
 
 # Environment defaults
 ENV PYTHONUNBUFFERED=1

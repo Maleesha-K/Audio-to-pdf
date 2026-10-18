@@ -267,12 +267,20 @@ def index():
 
 @app.get("/api/health")
 def health():
-    return {"ok": True, "project": "Gemini Notebook+ Annotator", "model": "gemini-3-flash-preview"}
+    return {"ok": True, "project": "Gemini Notebook+ Annotator", "model": "gemini-2.5-flash"}
 
 
 @app.get("/api/lessons")
 def list_lessons():
-    flagship_order = {"sample-optimization": 0, "764e94c7cee1": 1, "c06d6f2733cf": 2, "340684620bb9": 3}
+    flagship_order = {
+        "sample-optimization": 0,
+        "c06d6f2733cf": 1,
+        "340684620bb9": 2,
+        "39e3634e87d8": 3,
+        "9b1f46f4bacb": 4,
+        "764e94c7cee1": 5,
+        "eff13ddc461d": 6,
+    }
     archived_test_runs = {"b4cba7ab007f", "658ebbdb704e", "bc4fc246efc9", "e06c8a8cf140", "179957e3d5ba"}
     rows = []
     with LOCK:
