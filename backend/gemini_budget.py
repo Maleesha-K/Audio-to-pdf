@@ -2,11 +2,34 @@
 from __future__ import annotations
 
 import json
+import os
 import threading
 from pathlib import Path
 
 MAX_CALLS = 8
 CALL_LOCK = threading.Lock()  # serialize requests across lessons on a free-tier project
+
+
+def _load_dotenv() -> None:
+    if os.getenv("GEMINI_API_KEY"):
+        return
+    root = Path(__file__).resolve().parents[1]
+    for env_path in (root / ".env", Path.home() / ".env"):
+        if env_path.is_file():
+            try:
+                for line in env_path.read_text(encoding="utf-8").splitlines():
+                    line = line.strip()
+                    if not line or line.startswith("#") or "=" not in line:
+                        continue
+                    k, v = line.split("=", 1)
+                    k, v = k.strip(), v.strip().strip('"').strip("'")
+                    if k and v and k not in os.environ:
+                        os.environ[k] = v
+            except OSError:
+                pass
+
+
+_load_dotenv()
 
 
 class GeminiBudget:
@@ -22,9 +45,18 @@ class GeminiBudget:
 
     def _save(self):
         if self.path:
+            content = json.dumps(self.data, ensure_ascii=False)
             temp = self.path.with_suffix(".tmp")
-            temp.write_text(json.dumps(self.data, ensure_ascii=False), encoding="utf-8")
-            temp.replace(self.path)
+            try:
+                temp.write_text(content, encoding="utf-8")
+                temp.replace(self.path)
+            except OSError:
+                self.path.write_text(content, encoding="utf-8")
+                if temp.exists():
+                    try:
+                        temp.unlink()
+                    except OSError:
+                        pass
 
     def cached_plan(self, key: str):
         return self.data["plan_cache"].get(key)

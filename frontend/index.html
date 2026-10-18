@@ -3,65 +3,309 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Audio to PDF · Visual lecture studio</title>
-  <link rel="stylesheet" href="/ui/style.css?v=5">
+  <title>NotebookAnnotator · Where NotebookLM speaks, NotebookAnnotator points.</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/ui/style.css?v=26">
 </head>
 <body>
+  <!-- Google 4-Color Top Accent Strip -->
+  <div class="google-top-ribbon" aria-hidden="true"></div>
+
   <div class="app-shell">
+    <!-- Top Navigation Bar -->
     <header class="topbar">
-      <div class="brand"><span class="brand-icon">↗</span><span><b>Audio to PDF</b><small>Visual lecture studio</small></span></div>
-      <div class="header-right"><span class="local-badge"><i></i> Local MVP</span><button id="uploadToggle" class="subtle-button">New lesson</button></div>
+      <div class="brand-group">
+        <button class="brand" id="brandHome" type="button" title="NotebookAnnotator Home">
+          <div class="brand-icon" aria-hidden="true">
+            <svg viewBox="0 0 32 32" width="24" height="24" fill="none">
+              <!-- Google 4-Color Gemini Sparkle -->
+              <path d="M16 2C16 9.73 9.73 16 2 16C9.73 16 16 22.27 16 30C16 22.27 22.27 16 30 16C22.27 16 16 9.73 16 2Z" fill="url(#gGemini)" />
+              <defs>
+                <linearGradient id="gGemini" x1="2" y1="2" x2="30" y2="30" gradientUnits="userSpaceOnUse">
+                  <stop offset="0%" stop-color="#4285F4"/>
+                  <stop offset="35%" stop-color="#EA4335"/>
+                  <stop offset="70%" stop-color="#FBBC04"/>
+                  <stop offset="100%" stop-color="#34A853"/>
+                </linearGradient>
+              </defs>
+            </svg>
+          </div>
+          <div class="brand-text">
+            <span class="brand-name">Notebook<span class="plus-accent">+</span> <span class="brand-accent">Annotator</span></span>
+            <span class="brand-pill">RESEARCH STUDIO</span>
+          </div>
+        </button>
+      </div>
+
+      <div class="header-right">
+        <button id="showWelcomeBtn" class="subtle-button" type="button">Overview</button>
+        <button id="uploadToggle" class="primary-button" type="button"><span class="btn-icon" aria-hidden="true">＋</span> New Notebook</button>
+      </div>
     </header>
 
-    <aside class="sidebar">
-      <div class="sidebar-title"><span>YOUR LESSONS</span><button id="refreshLessons" aria-label="Refresh lessons" title="Refresh lessons">↻</button></div>
-      <div id="lessonList" class="lesson-list"><p class="empty-list">No lessons yet</p></div>
-      <div class="sidebar-footer">Your PDFs and audio stay on this computer. Review uncertain marks before sharing.</div>
+    <!-- Sidebar: Notebooks Library -->
+    <aside class="sidebar" aria-label="Notebook library">
+      <div class="sidebar-header">
+        <div class="sidebar-title">
+          <span>RESEARCH NOTEBOOKS</span>
+          <button id="refreshLessons" type="button" aria-label="Refresh notebooks" title="Refresh notebooks">↻</button>
+        </div>
+      </div>
+
+      <div id="lessonList" class="lesson-list">
+        <p class="empty-list">Loading notebooks…</p>
+      </div>
+
+      <button id="toggleDuplicates" class="duplicate-toggle hidden" type="button">Show archived test runs</button>
+
+      <div class="sidebar-footer">
+        <div class="footer-dots" aria-hidden="true">
+          <i class="dot-blue"></i><i class="dot-red"></i><i class="dot-yellow"></i><i class="dot-green"></i>
+        </div>
+        <div class="footer-note">Local &amp; Private · Built for Google Cloud AI Builder Cup</div>
+      </div>
     </aside>
 
+    <!-- Main Content Area -->
     <main class="main">
-      <section id="welcome" class="welcome panel">
-        <div class="eyebrow">FROM AUDIO TO VISUAL TEACHING</div>
-        <h1>Follow the explanation on the original page.</h1>
-        <p>Upload a lecture PDF and audio. The player keeps each page still while thin underlines and orange boxes appear with the narration.</p>
-        <div class="feature-row"><span>Exact uploaded pages</span><span>Editable timeline</span><span>Persistent marks</span><span>Review uncertain matches</span></div>
-        <button id="welcomeUpload" class="primary-button">Create a lesson <span>→</span></button>
-      </section>
-
-      <section id="playerSection" class="player-section hidden">
-        <div class="lesson-heading"><div><div class="eyebrow">NOW LEARNING</div><h1 id="lessonTitle">Lesson</h1><p id="lessonMeta"></p></div><div class="export-controls"><button id="rebuildAlignment" class="subtle-button">Rebuild PDF grounding</button><button id="rebuildFocus" class="subtle-button">Build equation focus</button><button id="exportJson" class="subtle-button">Export JSON</button><button id="exportMp4" class="primary-button">Compact MP4</button></div></div>
-        <div id="exportStatus" class="export-status hidden"></div>
-        <div class="content-grid">
-          <div id="viewerColumn" class="viewer-column">
-            <div class="viewer-top"><div><button id="prevPage" class="page-nav" aria-label="Previous lesson page">‹</button><select id="pageSelect" aria-label="Lesson page"></select><button id="nextPage" class="page-nav" aria-label="Next lesson page">›</button><button id="resumeSync" class="page-nav resume hidden">Resume audio page</button><span id="pagePill" class="page-pill">Page 1</span><strong id="pageTitle"></strong></div><span id="confidencePill" class="confidence-pill">Waiting</span></div>
-            <div id="stage" class="stage">
-              <img id="pageImage" alt="Current uploaded PDF page">
-              <img id="analogyImage" alt="Illustration for the current analogy" class="hidden">
-              <svg id="annotationLayer" class="annotation-layer" viewBox="0 0 1000 1000" preserveAspectRatio="none" aria-label="Timed annotations"></svg>
-              <div id="editHint" class="edit-hint hidden">Drag across the page to place the selected annotation</div>
+      <!-- Welcome / Hero Showcase Section -->
+      <section id="welcome" class="welcome">
+        <div class="hero-grid">
+          <div class="hero-copy">
+            <div class="eyebrow-badge">
+              <span class="eyebrow-dot"></span> BEYOND AUDIO OVERVIEWS
             </div>
-            <div class="playback panel"><div class="playback-main"><button id="skipBack" class="seek-button" type="button" aria-label="Backward 5 seconds" title="Backward 5 seconds (←)">−5s</button><audio id="audioPlayer" controls preload="auto"></audio><button id="skipForward" class="seek-button" type="button" aria-label="Forward 5 seconds" title="Forward 5 seconds (→)">+5s</button><button id="fullscreenToggle" class="seek-button fullscreen-button" type="button" aria-label="Toggle full screen" title="Full screen (F)">⛶ Full screen</button></div><div class="playback-secondary"><span id="nowTime">00:00</span><span id="currentConcept">Select a lesson to begin</span><label>Speed <select id="speed"><option value="0.8">0.8×</option><option value="1" selected>1×</option><option value="1.25">1.25×</option><option value="1.5">1.5×</option></select></label></div></div>
-            <div class="viewer-note">PDF marks and inserted analogy pages remain saved in the lesson and reappear on return visits.</div>
+            <h1 class="hero-title">
+              Where NotebookLM speaks,<br>
+              <span class="hero-brand">Notebook+ Annotator</span> points.
+            </h1>
+            <p class="hero-subhead">
+              Synchronizes lecture audio with your PDF slides in real time — tracking spoken ideas down to exact page coordinates and individual equation variables.
+            </p>
+
+            <div class="hero-actions">
+              <button id="enterFlagshipBtn" class="primary-button hero-cta" type="button">
+                Open Interactive Demo <span aria-hidden="true">→</span>
+              </button>
+              <button id="welcomeUpload" class="subtle-button hero-secondary" type="button">
+                Upload PDF + Audio
+              </button>
+            </div>
+
+            <!-- Crisp 3-Pillar Capability Row -->
+            <div class="hero-pillars">
+              <div class="pillar-item">
+                <span class="pillar-dot blue"></span>
+                <span>Coordinate Grounding</span>
+              </div>
+              <div class="pillar-item">
+                <span class="pillar-dot yellow"></span>
+                <span>Sub-Term Math Focus</span>
+              </div>
+              <div class="pillar-item">
+                <span class="pillar-dot green"></span>
+                <span>Gemini 3 Disambiguation</span>
+              </div>
+            </div>
           </div>
 
+          <!-- Clean 3D Interactive Slide Mockup -->
+          <div class="hero-3d-viewport" id="hero3dViewport" aria-label="Interactive 3D Grounding Preview">
+            <div class="hero-3d-scene" id="hero3dScene">
+              <div class="showcase-paper paper-back" aria-hidden="true"></div>
+              <div class="showcase-paper paper-front">
+                <div class="paper-top">
+                  <span class="paper-kicker">LECTURE NOTE 04</span>
+                  <span class="paper-page">Slide 04 / 28</span>
+                </div>
+                <h2 class="paper-title">Gradient Descent &amp; Loss Optimization</h2>
+                <div class="paper-rule"></div>
+                <p class="paper-summary">
+                  Update model weights iteratively by following the negative gradient of the loss function.
+                </p>
+                <div class="paper-formula">
+                  w<sub>t+1</sub> = w<sub>t</sub> − α · <span class="term-highlight">∂E / ∂w</span>
+                </div>
+                <div class="paper-line long"></div>
+                <div class="paper-line medium"></div>
+              </div>
+
+              <!-- Sleek Floating Audio Sync Pill -->
+              <div class="showcase-audio">
+                <span class="audio-play-icon" aria-hidden="true">▶</span>
+                <div class="audio-info">
+                  <div class="audio-speech">“the partial derivative with respect to weight…”</div>
+                  <div class="audio-equalizer" aria-hidden="true">
+                    <i class="eq-b"></i><i class="eq-r"></i><i class="eq-y"></i><i class="eq-g"></i>
+                    <i class="eq-b"></i><i class="eq-r"></i><i class="eq-y"></i><i class="eq-g"></i>
+                  </div>
+                </div>
+                <span class="audio-stamp">10:07</span>
+              </div>
+
+              <!-- Clean Sub-Term Focus Chip -->
+              <div class="showcase-focus">
+                <span class="focus-dot-pulse"></span> Active Sub-Term Locked
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 3-Step Process Footer -->
+        <div class="showcase-bottom">
+          <span><b>01</b> Upload Lecture PDF &amp; Audio</span>
+          <span><b>02</b> Real-Time Visual Grounding</span>
+          <span><b>03</b> Sub-Term Equation &amp; Diagram Focus</span>
+        </div>
+      </section>
+
+      <!-- Player Workspace Section -->
+      <section id="playerSection" class="player-section hidden">
+        <div class="lesson-heading">
+          <div class="lesson-heading-left">
+            <div class="eyebrow">NOTEBOOK WORKSPACE</div>
+            <h1 id="lessonTitle">Lesson</h1>
+            <p id="lessonMeta"></p>
+          </div>
+          <div class="export-controls">
+            <details class="more-menu">
+              <summary>More <span aria-hidden="true">⌄</span></summary>
+              <div class="more-menu-panel">
+                <button id="rebuildAlignment" class="subtle-button" title="Re-run PDF grounding">Rebuild PDF grounding</button>
+                <button id="rebuildFocus" class="subtle-button" title="Re-extract word-timed equation regions">Build equation focus</button>
+                <button id="exportJson" class="subtle-button">Export JSON</button>
+                <div class="menu-divider"></div>
+                <button id="deleteLessonBtn" class="subtle-button danger-button" title="Permanently delete this notebook">🗑 Delete notebook</button>
+              </div>
+            </details>
+            <button id="exportMp4" class="primary-button">↓ Export MP4</button>
+          </div>
+        </div>
+
+        <div id="exportStatus" class="export-status hidden"></div>
+
+        <!-- 1-Click Judge Demo Highlights Bar -->
+        <details class="demo-moments" open>
+          <summary>Demo Highlights</summary>
+          <div id="demoBookmarks" class="demo-bookmarks">
+            <button type="button" class="demo-chip chip-blue" data-lesson="sample-optimization" data-time="192.3">
+              <b>03:12</b> PDF Grounding Match
+            </button>
+            <button type="button" class="demo-chip chip-green" data-lesson="sample-optimization" data-time="221.2">
+              <b>03:41</b> Uncertain Review
+            </button>
+            <button type="button" class="demo-chip chip-blue" data-lesson="sample-optimization" data-time="254.4">
+              <b>04:14</b> Neural Net Architecture
+            </button>
+            <button type="button" class="demo-chip chip-red" data-lesson="sample-optimization" data-time="450.8">
+              <b>07:30</b> Squared Loss Formula
+            </button>
+            <button type="button" class="demo-chip chip-yellow" data-lesson="sample-optimization" data-time="607.2">
+              <b>10:07</b> Sub-Term: ∂E / ∂w
+            </button>
+            <button type="button" class="demo-chip chip-red" data-lesson="764e94c7cee1" data-time="196.2">
+              <b>03:16</b> Stokes' Vector Field
+            </button>
+          </div>
+        </details>
+
+        <div class="content-grid">
+          <!-- Left Column: PDF Stage + Playback Bar -->
+          <div id="viewerColumn" class="viewer-column">
+            <div class="viewer-top">
+              <div class="viewer-nav-group">
+                <button id="prevPage" class="page-nav" aria-label="Previous page">‹</button>
+                <select id="pageSelect" aria-label="Lesson page"></select>
+                <button id="nextPage" class="page-nav" aria-label="Next page">›</button>
+                <button id="resumeSync" class="page-nav resume hidden">⟳ Sync to Audio</button>
+                <span id="pagePill" class="page-pill">Page 1</span>
+                <strong id="pageTitle"></strong>
+              </div>
+              <div class="viewer-pills-right">
+                <span id="activeSubtermPill" class="subterm-pill hidden">∑ Term</span>
+                <span id="confidencePill" class="confidence-pill">Waiting</span>
+              </div>
+            </div>
+
+            <div id="stage" class="stage">
+              <img id="pageImage" alt="Current PDF page">
+              <img id="analogyImage" alt="Analogy illustration" class="hidden">
+              <svg id="annotationLayer" class="annotation-layer" viewBox="0 0 1000 1000" preserveAspectRatio="none" aria-label="Grounding annotations"></svg>
+              <div id="editHint" class="edit-hint hidden">Drag across the page to place the selected annotation</div>
+            </div>
+
+            <!-- Gemini Disambiguation Telemetry Banner -->
+            <div id="geminiInsightBanner" class="gemini-insight-banner hidden">
+              <div class="insight-icon" id="insightIcon">✦</div>
+              <div class="insight-body">
+                <div class="insight-head">
+                  <strong id="insightTitle">Gemini 3 Flash Grounding Telemetry</strong>
+                  <span id="insightBadge" class="insight-badge">Verified</span>
+                </div>
+                <p id="insightText"></p>
+              </div>
+            </div>
+
+            <!-- Playback Bar with 4-Color Audio Equalizer -->
+            <div class="playback panel">
+              <div class="playback-main">
+                <button id="skipBack" class="seek-button" type="button" aria-label="Backward 5 seconds" title="Backward 5 seconds (←)">−5s</button>
+                <audio id="audioPlayer" controls preload="auto"></audio>
+                <canvas id="audioVisualizer" class="audio-visualizer" width="140" height="34" title="Live Speech Frequency Activity"></canvas>
+                <button id="skipForward" class="seek-button" type="button" aria-label="Forward 5 seconds" title="Forward 5 seconds (→)">+5s</button>
+                <button id="fullscreenToggle" class="seek-button fullscreen-button" type="button" aria-label="Toggle full screen" title="Full screen (F)">⛶ Full screen</button>
+              </div>
+              <div class="playback-secondary">
+                <span class="live-meeting-chip"><i class="pulse-dot"></i> Synced Narration</span>
+                <span id="nowTime">00:00</span>
+                <span id="currentConcept">Select a notebook to begin</span>
+                <label class="speed-label">Speed
+                  <select id="speed">
+                    <option value="0.8">0.8×</option>
+                    <option value="1" selected>1×</option>
+                    <option value="1.25">1.25×</option>
+                    <option value="1.5">1.5×</option>
+                  </select>
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <!-- Right Column: Spoken Points Timeline -->
           <aside class="timeline panel">
-            <div class="timeline-header"><div><div class="eyebrow">TIMED POINTS</div><h2>Lecture timeline</h2></div><span id="pointCount">0 points</span></div>
+            <div class="timeline-header">
+              <div>
+                <div class="eyebrow">TRANSCRIPT &amp; SOURCE</div>
+                <h2>Spoken Points</h2>
+              </div>
+              <span id="pointCount">0 points</span>
+            </div>
             <div id="reviewSummary" class="review-summary">Processing accuracy signals…</div>
+            <div class="context-tabs" role="tablist" aria-label="Spoken point filter">
+              <button class="context-tab active" type="button" data-filter="all" role="tab" aria-selected="true">All points</button>
+              <button class="context-tab" type="button" data-filter="review" role="tab" aria-selected="false">Needs review</button>
+            </div>
             <div id="pointList" class="point-list"></div>
+
+            <!-- Point Editor -->
             <div id="editor" class="editor hidden">
               <div class="editor-head"><strong>Correct this point</strong><button id="closeEditor" aria-label="Close editor">×</button></div>
               <label>Page <input id="editPage" type="number" min="1"></label>
               <label>Document block <select id="editBlock"></select></label>
-              <label>Action <select id="editAction"><option value="hold">Hold page</option><option value="underline">Thin underline</option><option value="box">Orange box</option></select></label>
+              <label>Action <select id="editAction"><option value="hold">Hold page</option><option value="underline">Thin underline</option><option value="box">Equation box</option></select></label>
               <label>Concept <input id="editConcept" type="text"></label>
               <div class="editor-buttons"><button id="drawRegion" class="subtle-button">Draw region</button><button id="saveEdit" class="primary-button">Save correction</button></div>
               <div id="regionStatus" class="region-status">Select a visual action, then draw its target on the page.</div>
               <div id="focusEditor" class="focus-editor hidden"><strong>Word-timed equation box</strong><label>Cue <select id="focusSelect"></select></label><label>Start (seconds) <input id="focusStart" type="number" step="0.01" min="0"></label><label>End (seconds) <input id="focusEnd" type="number" step="0.01" min="0"></label><label>Term <select id="focusTerm"></select></label><div class="editor-buttons"><button id="drawFocusRegion" class="subtle-button">Draw focus box</button><button id="saveFocus" class="primary-button">Save cue</button></div><div id="focusStatus" class="region-status"></div></div>
             </div>
+
+            <!-- Analogy Editor -->
             <div id="whiteboardEditor" class="editor hidden">
               <div class="editor-head"><strong>Edit analogy page</strong><button id="closeWhiteboardEditor" aria-label="Close analogy editor">×</button></div>
               <label>Title <input id="whiteboardTitle" type="text" maxlength="100"></label>
-              <p class="editor-description">Adjust the saved drawing steps and their timing. The illustration remains a separate background.</p>
+              <p class="editor-description">Adjust drawing steps and timing.</p>
               <p id="whiteboardEvidence" class="editor-description"></p>
               <div id="whiteboardSteps" class="whiteboard-steps"></div>
               <div class="editor-buttons"><select id="newWhiteboardStep" aria-label="New drawing step"><option value="text">Text</option><option value="point">Point</option><option value="arrow">Arrow</option><option value="line">Line</option><option value="rectangle">Rectangle</option><option value="ellipse">Ellipse</option></select><button id="addWhiteboardStep" class="subtle-button">Add step</button></div>
@@ -76,12 +320,27 @@
     </main>
   </div>
 
+  <!-- Upload Dialog -->
   <div id="uploadDialog" class="dialog hidden" role="dialog" aria-modal="true" aria-labelledby="dialogTitle">
-    <div class="dialog-card"><button id="closeDialog" class="dialog-close" aria-label="Close">×</button><div class="eyebrow">NEW LESSON</div><h2 id="dialogTitle">Add your source material</h2><p>The first run downloads a local speech model and may take a few minutes. Later lessons reuse it.</p>
-      <form id="uploadForm"><label>Lecture PDF<input id="pdfInput" name="pdf" type="file" accept="application/pdf,.pdf" required></label><label>Audio explanation<input id="audioInput" name="audio" type="file" accept="audio/*,.m4a,.mp3,.wav,.ogg,.flac,.mp4" required></label><details><summary>Already have a timestamped transcript?</summary><label>Transcript JSON (optional)<input name="transcript" type="file" accept=".json,application/json"></label><small>Use a JSON object with a <code>segments</code> array. This skips transcription.</small></details><button class="primary-button" type="submit">Create lesson <span>→</span></button></form>
+    <div class="dialog-card">
+      <button id="closeDialog" class="dialog-close" aria-label="Close">×</button>
+      <div class="eyebrow">NEW NOTEBOOK</div>
+      <h2 id="dialogTitle">Add Lecture PDF &amp; Audio</h2>
+      <p class="dialog-desc">Files are processed locally. Grounding and sub-term equation focus are extracted automatically.</p>
+      <form id="uploadForm">
+        <label>Lecture PDF<input id="pdfInput" name="pdf" type="file" accept="application/pdf,.pdf" required></label>
+        <label>Audio explanation<input id="audioInput" name="audio" type="file" accept="audio/*,.m4a,.mp3,.wav,.ogg,.flac,.mp4" required></label>
+        <details>
+          <summary>Already have a timestamped transcript?</summary>
+          <label>Transcript JSON (optional)<input name="transcript" type="file" accept=".json,application/json"></label>
+          <small>Use a JSON object with a <code>segments</code> array. This skips local transcription.</small>
+        </details>
+        <button class="primary-button upload-submit" type="submit">Create Notebook <span>→</span></button>
+      </form>
       <div id="uploadStatus" class="upload-status hidden"></div>
     </div>
   </div>
-  <script src="/ui/app.js?v=11" defer></script>
+
+  <script src="/ui/app.js?v=26" defer></script>
 </body>
 </html>

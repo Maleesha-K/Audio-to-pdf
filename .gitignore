@@ -2,7 +2,22 @@
 .uv-cache/
 __pycache__/
 *.pyc
-data/
-tests/tmp*/
 .env
+tests/tmp*/
+scratch/
+~$*
 
+# Temporary run folders
+data/tmp*/
+
+# Ignore local downloads and temporary user uploads
+data/models/
+data/lessons/*
+!data/lessons/sample-optimization/
+!data/lessons/sample-optimization/**
+!data/sample-optimization-template/
+!data/sample-optimization-template/**
+
+# Always ignore large video exports and previews
+*.mp4
+data/**/exports/

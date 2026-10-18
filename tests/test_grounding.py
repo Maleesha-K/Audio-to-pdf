@@ -54,8 +54,9 @@ class GroundingTest(unittest.TestCase):
             raise unittest.SkipTest("Local FastEmbed model has not been downloaded")
         cls.results = {}
         for name in ("764e94c7cee1", "sample-optimization"):
-            lesson = json.loads((LESSONS/name/"lesson.json").read_text(encoding="utf-8"))
-            transcript = json.loads((LESSONS/name/"transcript.json").read_text(encoding="utf-8"))
+            folder = (LESSONS / name) if (LESSONS / name / "lesson.json").exists() else (ROOT / "tests" / "fixtures" / name)
+            lesson = json.loads((folder / "lesson.json").read_text(encoding="utf-8"))
+            transcript = json.loads((folder / "transcript.json").read_text(encoding="utf-8"))
             build_document_map(lesson["pages"])
             cls.results[name] = (lesson["pages"],align_document(make_points(transcript["segments"]),lesson["pages"],MODEL))
 
@@ -214,6 +215,45 @@ class GroundingTest(unittest.TestCase):
         self.assertEqual(res_pt["action"], "underline")
         self.assertIn("resolution", blocks_by_id[res_pt["block_id"]]["text"].lower())
 
+    def test_rule_mining_no_premature_page_freeze(self):
+        if not (LESSONS / "5c1be348c21d" / "lesson.json").exists():
+            return
+        lesson = json.loads((LESSONS / "5c1be348c21d" / "lesson.json").read_text(encoding="utf-8"))
+        transcript = json.loads((LESSONS / "5c1be348c21d" / "transcript.json").read_text(encoding="utf-8"))
+        build_document_map(lesson["pages"])
+        points = align_document(make_points(transcript["segments"]), lesson["pages"], MODEL)
+
+        # Verify 07:27-23:00 progresses smoothly through Pages 8, 9, 10, 11, 12, 14, 15
+        # and also verify FP-tree duplicate frame skipping (Pages 20->22->24->26->48->49->50->51)
+        # and constraints vs summary disambiguation (Pages 66->68->69).
+        expected_landmarks = [
+            (255, 5),    # 04:15 Session Outcomes
+            (320, 7),    # 05:20 Defining Frequent Pattern Analysis
+            (455, 8),    # 07:35 Importance of Frequent Pattern Mining (was prematurely jumping to Page 15!)
+            (550, 9),    # 09:10 Basic Concepts: Support and Confidence
+            (850, 10),   # 14:10 Downward Closure Property
+            (980, 11),   # 16:20 Scalable Methods Overview
+            (1090, 12),  # 18:10 Apriori: Candidate Generation-and-Test
+            (1220, 14),  # 20:20 Important Details of Apriori
+            (1365, 15),  # 22:45 Challenges of Frequent Pattern Mining
+            (1875, 20),  # 31:15 Construct FP-tree
+            (1886, 22),  # 31:26 Step 1
+            (1900, 24),  # 31:40 Step 2
+            (1940, 26),  # 32:20 Step 3
+            (2000, 48),  # 33:20 Benefits of the FP-tree Structure
+            (2095, 49),  # 34:55 How to Mine Frequent Patterns Using FP-tree
+            (2140, 50),  # 35:40 Scalability: FP-Growth vs. Apriori
+            (2235, 51),  # 37:15 Why Is FP-Growth the Winner?
+            (2910, 66),  # 48:30 Constraints in Data Mining (was prematurely jumping to Page 69!)
+            (2990, 68),  # 49:50 Constrained Mining vs. Naive Mining
+            (3100, 69),  # 51:40 Frequent-Pattern Mining: Summary
+        ]
+        for sec, exp_page in expected_landmarks:
+            pt = _at(points, sec)
+            self.assertIsNotNone(pt, f"Missing point at {sec}s")
+            self.assertEqual(pt["page"], exp_page, f"At {sec}s expected page {exp_page}, got {pt['page']}")
+
 
 if __name__ == "__main__": unittest.main()
+
 

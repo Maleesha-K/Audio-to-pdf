@@ -62,16 +62,26 @@ def _lesson_dir(lesson_id: str) -> Path:
     if not lesson_id or not all(ch.isalnum() or ch == "-" for ch in lesson_id):
         raise HTTPException(400, "Invalid lesson identifier")
     path = LESSONS / lesson_id
-    if not path.is_dir():
-        raise HTTPException(404, "Lesson not found")
-    return path
+    if path.is_dir():
+        return path
+    for candidate in LESSONS.iterdir():
+        if candidate.is_dir() and (candidate / "lesson.json").exists():
+            try:
+                data = json.loads((candidate / "lesson.json").read_text(encoding="utf-8-sig"))
+                if data.get("id") == lesson_id:
+                    return candidate
+            except Exception:
+                pass
+    raise HTTPException(404, "Lesson not found")
 
 
 def _load_lesson(lesson_id: str) -> dict:
-    path = _lesson_dir(lesson_id) / "lesson.json"
+    lesson_dir = _lesson_dir(lesson_id)
+    path = lesson_dir / "lesson.json"
     if not path.exists():
         raise HTTPException(409, "Lesson is still processing")
-    lesson = json.loads(path.read_text(encoding="utf-8"))
+    lesson = json.loads(path.read_text(encoding="utf-8-sig"))
+    lesson["id"] = lesson_dir.name
     if "lesson_pages" not in lesson:
         lesson["lesson_pages"] = [{"id":f"pdf-{p['number']}","kind":"pdf","source_page":p["number"],
             "title":p["title"],"image":p["image"],"width":p["width"],"height":p["height"]} for p in lesson["pages"]]
@@ -87,7 +97,7 @@ def _load_lesson(lesson_id: str) -> dict:
 def _save_lesson(lesson: dict) -> None:
     path = _lesson_dir(lesson["id"]) / "lesson.json"
     temp = path.with_suffix(".json.tmp")
-    temp.write_text(json.dumps(lesson, ensure_ascii=False), encoding="utf-8")
+    temp.write_text(json.dumps(lesson, ensure_ascii=False), encoding="utf-8-sig")
     temp.replace(path)
 
 
@@ -102,19 +112,38 @@ async def _save_upload(upload: UploadFile, destination: Path) -> None:
             out.write(chunk)
 
 
+def _write_job_file(lesson_dir: Path, payload: dict) -> None:
+    try:
+        if lesson_dir.is_dir():
+            (lesson_dir / "job.json").write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8-sig")
+    except Exception:
+        pass
+
+
 def _run_job(lesson_id: str, transcript_path: Path | None, title: str | None = None) -> None:
     lesson_dir = LESSONS / lesson_id
-    with LOCK:
-        JOBS[lesson_id] = {"status": "processing", "message": "Analyzing PDF and audio"}
+    job_title = (title or lesson_id).strip() or lesson_id
+    def _update_stage(msg: str) -> None:
+        payload = {"status": "processing", "message": msg, "title": job_title}
+        with LOCK:
+            JOBS[lesson_id] = payload
+        _write_job_file(lesson_dir, payload)
+    _update_stage("Extracting PDF slides & math formulas…")
     try:
         audio_path = next(lesson_dir.glob("audio.*"))
-        supplied = json.loads(transcript_path.read_text(encoding="utf-8")) if transcript_path else None
-        result = process(lesson_dir / "source.pdf", audio_path, lesson_dir, MODELS, supplied, title=title)
+        supplied = json.loads(transcript_path.read_text(encoding="utf-8-sig")) if transcript_path else None
+        result = process(lesson_dir / "source.pdf", audio_path, lesson_dir, MODELS, supplied, title=title, progress_cb=_update_stage)
+        ready_payload = {"status": "ready", "message": "Lesson ready", "title": result.get("title", job_title), "points": len(result["points"])}
         with LOCK:
-            JOBS[lesson_id] = {"status": "ready", "message": "Lesson ready", "points": len(result["points"])}
+            JOBS[lesson_id] = ready_payload
+        _write_job_file(lesson_dir, ready_payload)
     except Exception as exc:
+        fail_payload = {"status": "failed", "message": str(exc)[:500], "title": job_title}
         with LOCK:
-            JOBS[lesson_id] = {"status": "failed", "message": str(exc)[:500]}
+            JOBS[lesson_id] = fail_payload
+        _write_job_file(lesson_dir, fail_payload)
+
+
 
 
 def _run_alignment_rebuild(lesson_id: str) -> None:
@@ -124,8 +153,9 @@ def _run_alignment_rebuild(lesson_id: str) -> None:
             lesson = _load_lesson(lesson_id)
         lesson_dir = _lesson_dir(lesson_id)
         pages = analyze_pdf(lesson_dir / "source.pdf", lesson_dir / "pages")
-        transcript = json.loads((lesson_dir / "transcript.json").read_text(encoding="utf-8"))
-        generated = align_document(make_points(transcript.get("segments",[])), pages, MODELS)
+        transcript = json.loads((lesson_dir / "transcript.json").read_text(encoding="utf-8-sig"))
+        from .gemini_budget import GeminiBudget
+        generated = align_document(make_points(transcript.get("segments",[])), pages, MODELS, budget=GeminiBudget(lesson_dir))
         updated = _merge_rebuilt_points(lesson, generated, pages)
         lesson["pages"] = pages
         lesson["points"] = updated
@@ -135,8 +165,16 @@ def _run_alignment_rebuild(lesson_id: str) -> None:
         for page in lesson["lesson_pages"]:
             if page["kind"] == "pdf":
                 page["title"] = pages[page["source_page"]-1]["title"]
-        # Retain deliberate equation-focus corrections; obsolete inferred cues can mislead.
-        lesson["equation_focus"] = [e for e in lesson.get("equation_focus",[]) if e.get("edited")]
+        # Rebuild equation focus and retain deliberate user corrections.
+        corrections = [e for e in lesson.get("equation_focus",[]) if e.get("edited")]
+        generated_focus = build_focus(lesson, lesson_dir / "source.pdf")
+        for correction in corrections:
+            generated_focus = [event for event in generated_focus if not
+                               (event.get("point_id") == correction.get("point_id") and
+                                abs(event["start"] - correction.get("source_start", correction["start"])) < .35)]
+            generated_focus.append(correction)
+        generated_focus.sort(key=lambda event: event["start"])
+        lesson["equation_focus"] = generated_focus
         lesson["stats"]["review_count"] = sum(p.get("needs_review",False) for p in updated)
         lesson["stats"]["points"] = len(updated)
         lesson["stats"]["equation_focus_count"] = len(lesson["equation_focus"])
@@ -229,18 +267,81 @@ def index():
 
 @app.get("/api/health")
 def health():
-    return {"ok": True, "project": "Audio to PDF"}
+    return {"ok": True, "project": "Gemini Notebook+ Annotator", "model": "gemini-3-flash-preview"}
 
 
 @app.get("/api/lessons")
 def list_lessons():
+    flagship_order = {"sample-optimization": 0, "764e94c7cee1": 1, "c06d6f2733cf": 2, "340684620bb9": 3}
+    archived_test_runs = {"b4cba7ab007f", "658ebbdb704e", "bc4fc246efc9", "e06c8a8cf140", "179957e3d5ba"}
     rows = []
-    for path in sorted(LESSONS.iterdir(), key=lambda p: p.stat().st_mtime, reverse=True):
+    with LOCK:
+        active_jobs = {lid: dict(j) for lid, j in JOBS.items()}
+    for lid, job in reversed(list(active_jobs.items())):
+        lesson_dir = LESSONS / lid
+        if lesson_dir.is_dir() and not (lesson_dir / "lesson.json").exists():
+            st = job.get("status", "processing")
+            if st in {"queued", "processing", "failed"}:
+                rows.append({
+                    "id": lid,
+                    "title": job.get("title") or lid,
+                    "status": st,
+                    "status_message": job.get("message") or "Generating notebook…",
+                    "duration": 0,
+                    "stats": {"page_count": 0, "equation_focus_count": 0, "gemini_count": 0},
+                    "is_flagship": False,
+                    "is_duplicate": False,
+                })
+    seen_titles: set[str] = set()
+    all_paths = sorted(LESSONS.iterdir(), key=lambda p: (flagship_order.get(p.name, 99), -p.stat().st_mtime))
+    for path in all_paths:
         lesson_file = path / "lesson.json"
         if path.is_dir() and lesson_file.exists():
-            data = json.loads(lesson_file.read_text(encoding="utf-8"))
-            rows.append({"id": data["id"], "title": data["title"], "duration": data["duration"], "stats": data["stats"]})
+            data = json.loads(lesson_file.read_text(encoding="utf-8-sig"))
+            stats = dict(data.get("stats") or {})
+            stats["equation_focus_count"] = len(data.get("equation_focus") or [])
+            stats["gemini_count"] = sum(
+                1 for pt in data.get("points") or []
+                if "gemini_disambiguation" in (pt.get("evidence") or {})
+            )
+            norm_title = str(data.get("title", "")).strip().lower()
+            is_duplicate = (path.name in archived_test_runs or norm_title in seen_titles) and path.name not in flagship_order
+            seen_titles.add(norm_title)
+            rows.append({
+                "id": path.name,
+                "title": data["title"],
+                "status": "ready",
+                "duration": data["duration"],
+                "stats": stats,
+                "is_flagship": path.name in flagship_order,
+                "is_duplicate": is_duplicate,
+            })
+        elif path.is_dir() and not lesson_file.exists() and (path / "source.pdf").exists() and path.name not in active_jobs:
+            job_info = {}
+            job_file = path / "job.json"
+            if job_file.exists():
+                try:
+                    job_info = json.loads(job_file.read_text(encoding="utf-8-sig"))
+                except Exception:
+                    pass
+            title = job_info.get("title") or path.name
+            st = job_info.get("status", "processing")
+            msg = job_info.get("message", "Processing in background…")
+            if st == "processing":
+                st = "failed"
+                msg = "Interrupted by server restart. Click trash to remove."
+            rows.append({
+                "id": path.name,
+                "title": title,
+                "status": st,
+                "status_message": msg,
+                "duration": 0,
+                "stats": {"page_count": 0, "equation_focus_count": 0, "gemini_count": 0},
+                "is_flagship": False,
+                "is_duplicate": False,
+            })
     return rows
+
 
 
 @app.post("/api/lessons", status_code=202)
@@ -268,28 +369,39 @@ async def create_lesson(background: BackgroundTasks, pdf: UploadFile = File(...)
         transcript_path = lesson_dir / "supplied-transcript.json"
         await _save_upload(transcript, transcript_path)
         try:
-            supplied = json.loads(transcript_path.read_text(encoding="utf-8"))
+            supplied = json.loads(transcript_path.read_text(encoding="utf-8-sig"))
             if not isinstance(supplied.get("segments"), list):
                 raise ValueError("Missing segments")
         except (ValueError, UnicodeError):
             shutil.rmtree(lesson_dir)
             raise HTTPException(400, "Transcript JSON must contain a segments array")
     upload_title = Path(pdf.filename).stem
+    job_payload = {"status": "queued", "message": "Preparing notebook…", "title": upload_title}
     with LOCK:
-        JOBS[lesson_id] = {"status": "queued", "message": "Upload complete"}
+        JOBS[lesson_id] = job_payload
+    _write_job_file(lesson_dir, job_payload)
     background.add_task(_run_job, lesson_id, transcript_path, upload_title)
-    return {"id": lesson_id, "status": "queued"}
+    return {"id": lesson_id, "title": upload_title, "status": "queued", "message": "Preparing notebook…"}
+
 
 
 @app.get("/api/jobs/{lesson_id}")
 def job_status(lesson_id: str):
-    _lesson_dir(lesson_id)
+    lesson_dir = _lesson_dir(lesson_id)
     with LOCK:
         job = JOBS.get(lesson_id)
     if job:
         return job
-    if (_lesson_dir(lesson_id) / "lesson.json").exists():
+    job_file = lesson_dir / "job.json"
+    if job_file.exists():
+        try:
+            return json.loads(job_file.read_text(encoding="utf-8-sig"))
+        except Exception:
+            pass
+    if (lesson_dir / "lesson.json").exists():
         return {"status": "ready", "message": "Lesson ready"}
+    if (lesson_dir / "source.pdf").exists():
+        return {"status": "processing", "message": "Processing in background…"}
     return {"status": "unknown", "message": "No active processing job"}
 
 
@@ -309,7 +421,7 @@ def get_lesson(lesson_id: str):
     transcript_path = lesson_dir / "transcript.json"
     if transcript_path.exists():
         try:
-            tr = json.loads(transcript_path.read_text(encoding="utf-8"))
+            tr = json.loads(transcript_path.read_text(encoding="utf-8-sig"))
             response["captions"] = [
                 {"start": s["start"], "end": s["end"], "text": s.get("text", "").strip()}
                 for s in tr.get("segments", []) if s.get("text", "").strip()
@@ -319,6 +431,43 @@ def get_lesson(lesson_id: str):
     else:
         response["captions"] = []
     return response
+
+
+def _safe_remove_dir(target: Path, retries: int = 6, delay: float = 0.25) -> None:
+    import gc, time
+    gc.collect()
+    for attempt in range(retries):
+        try:
+            if target.exists():
+                shutil.rmtree(target)
+            return
+        except (PermissionError, OSError):
+            gc.collect()
+            time.sleep(delay)
+    if target.exists():
+        try:
+            trash = target.parent / f".trash_{target.name}_{int(time.time())}"
+            target.rename(trash)
+            shutil.rmtree(trash, ignore_errors=True)
+        except Exception:
+            shutil.rmtree(target, ignore_errors=True)
+
+
+@app.delete("/api/lessons/{lesson_id}")
+def delete_lesson(lesson_id: str):
+    lesson_dir = _lesson_dir(lesson_id)
+    with LOCK:
+        try:
+            _safe_remove_dir(lesson_dir)
+            JOBS.pop(lesson_id, None)
+            JOBS.pop(lesson_dir.name, None)
+            stale_exports = [k for k, v in EXPORT_JOBS.items() if v.get("lesson_id") in (lesson_id, lesson_dir.name)]
+            for k in stale_exports:
+                EXPORT_JOBS.pop(k, None)
+        except Exception as exc:
+            raise HTTPException(500, f"Could not delete notebook: {exc}")
+    return {"ok": True, "id": lesson_id}
+
 
 
 @app.post("/api/lessons/{lesson_id}/alignment/rebuild", status_code=202)
@@ -509,7 +658,7 @@ def edit_equation_focus(lesson_id: str, event_id: str, edit: EquationFocusEdit):
 @app.get("/api/lessons/{lesson_id}/export.json")
 def export_timeline(lesson_id: str):
     lesson = _load_lesson(lesson_id)
-    return {"title": lesson["title"], "duration": lesson["duration"], "lesson_pages":lesson["lesson_pages"],
+    return {"id": lesson_id, "title": lesson["title"], "duration": lesson["duration"], "lesson_pages":lesson["lesson_pages"],
             "whiteboards":lesson.get("whiteboards",[]), "points": lesson["points"],
             "equation_focus":lesson["equation_focus"]}
 

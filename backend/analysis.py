@@ -303,11 +303,19 @@ def _concept(text: str) -> str:
 
 
 def process(pdf_path: Path, audio_path: Path, lesson_dir: Path, model_dir: Path,
-            supplied_transcript: dict | None = None, title: str | None = None) -> dict:
+            supplied_transcript: dict | None = None, title: str | None = None,
+            progress_cb=None) -> dict:
+    if progress_cb:
+        progress_cb("Extracting PDF slides & math formulas…")
     pages = analyze_pdf(pdf_path, lesson_dir / "pages")
+    if supplied_transcript is None and progress_cb:
+        progress_cb("Transcribing lecture audio…")
     transcript = supplied_transcript or transcribe(audio_path, model_dir)
     (lesson_dir / "transcript.json").write_text(json.dumps(transcript, ensure_ascii=False, indent=2), encoding="utf-8")
-    points = align_document(make_points(transcript["segments"]), pages, model_dir)
+    if progress_cb:
+        progress_cb("Grounding audio to PDF & Gemini 3 Flash…")
+    from .gemini_budget import GeminiBudget
+    points = align_document(make_points(transcript["segments"]), pages, model_dir, budget=GeminiBudget(lesson_dir))
     # Existing whiteboards remain readable; new lessons concentrate on source grounding.
     lesson_pages = [{"id":f"pdf-{p['number']}","kind":"pdf","source_page":p["number"],
                      "title":p["title"],"image":p["image"],"width":p["width"],"height":p["height"]}
@@ -323,8 +331,11 @@ def process(pdf_path: Path, audio_path: Path, lesson_dir: Path, model_dir: Path,
               "stats": {"page_count": len(pages), "transcript_segments": len(transcript["segments"]),
                         "lesson_page_count": len(lesson_pages), "whiteboard_count": len(whiteboards),
                         "points": len(points), "review_count": sum(p["needs_review"] for p in points)}}
-    lesson["equation_focus"] = []
+    if progress_cb:
+        progress_cb("Building word-timed equation focus…")
+    lesson["equation_focus"] = build_focus(lesson, pdf_path)
     lesson["stats"]["equation_focus_count"] = len(lesson["equation_focus"])
     lesson["stats"]["equation_focus_review_count"] = sum(e["needs_review"] for e in lesson["equation_focus"])
     (lesson_dir / "lesson.json").write_text(json.dumps(lesson, ensure_ascii=False), encoding="utf-8")
     return lesson
+
