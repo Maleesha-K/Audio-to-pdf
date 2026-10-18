@@ -251,7 +251,7 @@ CURRENT EXCERPT: {point['text'][:1800]}"""
                     buffer = BytesIO()
                     page_image.save(buffer, "JPEG", quality=72)
                 contents.append(types.Part.from_bytes(data=buffer.getvalue(), mime_type="image/jpeg"))
-        model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+        model = os.getenv("GEMINI_MODEL", "gemini-3-flash-preview")
         digest = hashlib.sha256((model+"\n"+prompt+"\n"+str((page or {}).get('number',''))).encode()).hexdigest()
         cached = budget.cached_plan(digest)
         if cached is not None:

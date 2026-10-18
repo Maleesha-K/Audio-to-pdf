@@ -489,7 +489,7 @@ def disambiguate_with_gemini(
         },
         "required": ["chosen_block_id", "confidence", "reasoning"],
     }
-    model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+    model = os.getenv("GEMINI_MODEL", "gemini-3-flash-preview")
     digest = hashlib.sha256((model + "\ngrounding-v1\n" + prompt).encode("utf-8")).hexdigest()
 
     def _validate(raw: dict) -> dict | None:
@@ -719,8 +719,9 @@ def align_document(
         if block["kind"] == "unreadable": supported=False
         gemini_pick = None
         gemini_resolved = False
-        if (not anchored and not supported and len(candidates) >= 2
-                and (budget is not None or bool(os.getenv("GEMINI_API_KEY")))
+        if (not anchored and not supported and budget is not None and len(candidates) >= 2
+                and (page_num > 1 or npage == 1)
+                and (score >= .12 or lexical >= .08 or npage == 1)
                 and (score - next_score < .04 or lexical < .22)):
             forward_candidates = [
                 b for _, b, j in sorted(candidates, key=lambda row: row[2])
