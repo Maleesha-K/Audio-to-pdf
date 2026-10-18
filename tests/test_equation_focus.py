@@ -110,5 +110,43 @@ class EquationFocusTest(unittest.TestCase):
                 self.assertEqual(loaded['equation_focus'],[])
                 self.assertEqual(len(loaded['points']),len(old['points']))
 
+    def test_universal_math_glyph_normalization(self):
+        from backend.equation_focus import _norm_char
+        self.assertEqual(_norm_char('\uf06d'), 'μ')
+        self.assertEqual(_norm_char('\uf073'), 'σ')
+        self.assertEqual(_norm_char('\uf0e5'), '∑')
+        self.assertEqual(_norm_char('\uf053'), '∑')
+        self.assertEqual(_norm_char('\uf064'), 'δ')
+        self.assertEqual(_norm_char('\uf0b6'), '∂')
+        self.assertEqual(_norm_char('\U0001d715'), '∂')
+        self.assertEqual(_norm_char('\U0001d464'), 'w')
+        self.assertEqual(_norm_char('\u2212'), '-')
+        self.assertEqual(_norm_char('\u2013'), '-')
+
+    def test_data_mining_and_calculus_subterm_tracking(self):
+        dm_dir = ROOT / 'data' / 'lessons' / '658ebbdb704e'
+        calc_dir = ROOT / 'data' / 'lessons' / '764e94c7cee1'
+        if dm_dir.is_dir():
+            dm_lesson = json.loads((dm_dir / 'lesson.json').read_text(encoding='utf-8'))
+            dm_events = build_focus(dm_lesson, dm_dir / 'source.pdf')
+            dm_terms_tracked = {e['term_id'] for e in dm_events}
+            # Page 12 has 5 equations (sample mean, population mean, weighted mean, median, empirical formula)
+            p12_eqs = [v for v in dm_lesson['pages'][11]['visuals'] if v['kind'] == 'equation']
+            self.assertGreaterEqual(len(p12_eqs), 4)
+            # Page 14 has IQR, sample variance s^2, and population variance sigma^2
+            p14_eqs = [v for v in dm_lesson['pages'][13]['visuals'] if v['kind'] == 'equation']
+            self.assertGreaterEqual(len(p14_eqs), 3)
+            # Page 17 has the 3 empirical rule intervals (μ±σ, μ±2σ, μ±3σ)
+            p17_eqs = [v for v in dm_lesson['pages'][16]['visuals'] if v['kind'] == 'equation']
+            self.assertGreaterEqual(len(p17_eqs), 3)
+            for expected_role in ('sum', 'x_bar', 'mu', 'weight', 'median_term', 'mode_term', 'iqr', 'q1', 'q3', 's2', 'sigma2', 'mu_sigma_1', 'mu_sigma_2', 'mu_sigma_3', 'z_score', 'cosine'):
+                self.assertIn(expected_role, dm_terms_tracked)
+        if calc_dir.is_dir():
+            calc_lesson = json.loads((calc_dir / 'lesson.json').read_text(encoding='utf-8'))
+            calc_events = build_focus(calc_lesson, calc_dir / 'source.pdf')
+            calc_terms_tracked = {e['term_id'] for e in calc_events}
+            for expected_role in ('sigma', 'integral', 'curl', 'div', 'phi', 'unit_vectors'):
+                self.assertIn(expected_role, calc_terms_tracked)
+
 
 if __name__ == '__main__': unittest.main()

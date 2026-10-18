@@ -323,7 +323,7 @@ def process(pdf_path: Path, audio_path: Path, lesson_dir: Path, model_dir: Path,
               "stats": {"page_count": len(pages), "transcript_segments": len(transcript["segments"]),
                         "lesson_page_count": len(lesson_pages), "whiteboard_count": len(whiteboards),
                         "points": len(points), "review_count": sum(p["needs_review"] for p in points)}}
-    lesson["equation_focus"] = []
+    lesson["equation_focus"] = build_focus(lesson, pdf_path)
     lesson["stats"]["equation_focus_count"] = len(lesson["equation_focus"])
     lesson["stats"]["equation_focus_review_count"] = sum(e["needs_review"] for e in lesson["equation_focus"])
     (lesson_dir / "lesson.json").write_text(json.dumps(lesson, ensure_ascii=False), encoding="utf-8")

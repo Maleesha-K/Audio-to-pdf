@@ -135,8 +135,16 @@ def _run_alignment_rebuild(lesson_id: str) -> None:
         for page in lesson["lesson_pages"]:
             if page["kind"] == "pdf":
                 page["title"] = pages[page["source_page"]-1]["title"]
-        # Retain deliberate equation-focus corrections; obsolete inferred cues can mislead.
-        lesson["equation_focus"] = [e for e in lesson.get("equation_focus",[]) if e.get("edited")]
+        # Rebuild equation focus and retain deliberate user corrections.
+        corrections = [e for e in lesson.get("equation_focus",[]) if e.get("edited")]
+        generated_focus = build_focus(lesson, lesson_dir / "source.pdf")
+        for correction in corrections:
+            generated_focus = [event for event in generated_focus if not
+                               (event.get("point_id") == correction.get("point_id") and
+                                abs(event["start"] - correction.get("source_start", correction["start"])) < .35)]
+            generated_focus.append(correction)
+        generated_focus.sort(key=lambda event: event["start"])
+        lesson["equation_focus"] = generated_focus
         lesson["stats"]["review_count"] = sum(p.get("needs_review",False) for p in updated)
         lesson["stats"]["points"] = len(updated)
         lesson["stats"]["equation_focus_count"] = len(lesson["equation_focus"])
