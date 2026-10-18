@@ -25,6 +25,13 @@ if __name__ == "__main__":
     except RuntimeError as error:
         print(error, file=sys.stderr, flush=True)
         raise SystemExit(1)
-    print(f"OPEN THIS ADDRESS: http://127.0.0.1:{port}/", flush=True)
-    print("Keep this window open while using the app.", flush=True)
-    uvicorn.run("backend.app:app", host="127.0.0.1", port=port)
+    project_root = Path(__file__).resolve().parents[1]
+    uvicorn.run(
+        "backend.app:app",
+        host="127.0.0.1",
+        port=port,
+        reload=True,
+        reload_dirs=[str(project_root / "backend"), str(project_root / "frontend")],
+        reload_excludes=["*.png", "*.m4a", "*.mp3", "*.pdf", "*.tmp", "data/*"],
+    )
+

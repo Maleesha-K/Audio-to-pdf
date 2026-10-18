@@ -26,6 +26,18 @@ KEEP_PLURAL = {"stokes", "series", "species", "means", "values", "coordinates", 
 def _norm_token(word: str) -> str:
     if len(word) < 5 or word in KEEP_PLURAL or not word.isalpha():
         return word
+    if word.endswith("ance") and len(word) >= 8:
+        return word[:-4] + "ant"
+    if word.endswith("ence") and len(word) >= 8 and word not in {"sequence", "sentence", "evidence", "reference", "science", "presence", "experience"}:
+        return word[:-4] + "ent"
+    if word in {"constructing", "constructed", "construction", "constructs"}:
+        return "construct"
+    if word in {"defining", "defined"}:
+        return "define"
+    if word in {"exploring", "explored"}:
+        return "explore"
+    if word in {"applying", "applied"}:
+        return "apply"
     if word.endswith("ies") and len(word) >= 6:
         return word[:-3] + "y"
     if word.endswith("s") and not word.endswith(("ss", "us", "is", "as", "os", "ics", "es")):
@@ -36,10 +48,17 @@ def _norm_token(word: str) -> str:
 
 
 def tokens(value: str) -> list[str]:
-    value = value.lower().replace("’", "'").replace("stoke's", "stokes")
+    value = value.lower().replace("’", "'").replace("ï", "i").replace("stoke's", "stokes")
     value = value.replace("divergence", "divergence").replace("decent", "descent")
     value = value.replace("rms prop", "rmsprop").replace("atom optimizer", "adam optimizer")
     value = value.replace("min kovski", "minkowski").replace("a similarity matrix", "dissimilarity matrix")
+    value = re.sub(r"\ba\s+priori\b", "apriori", value)
+    value = re.sub(r"\bf\.?\s*p\.?\s*(?=growth|tree\b)", "fp ", value)
+    value = re.sub(r"\bitem\s+sets?\b", "itemset", value)
+    value = re.sub(r"\bfreq\.?(?=\s|$|[^a-z])", "frequent", value)
+    value = re.sub(r"\bversus\b", "vs", value)
+    value = re.sub(r"\bmulti[-\s]+level\b", "multilevel", value)
+    value = re.sub(r"\bmulti[-\s]+dimensional\b", "multidimensional", value)
     return [_norm_token(t) for t in re.findall(r"[a-z]+|\d+(?:\.\d+)*", value) if t not in COMMON]
 
 
@@ -266,14 +285,14 @@ def _section_number(text: str) -> str | None:
 
 
 CUE_RE = re.compile(
-    r"\b(?:subtopic|main topic|next topic|section)"
-    r"(?:\s+(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen))?"
+    r"\b(?:sub[-\s]*topic|main\s+topic|next\s+topic|section)"
+    r"(?:\s+(?:\d+|one|two|to|too|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen))?"
     r"(?:\s+(?:here\s+is|is|under\s+that\s+is))?\s*[,:;.!?-]*",
     re.I,
 )
 DANGLING_CUE_RE = re.compile(
-    r"\b(?:subtopic|main topic|next topic|section)"
-    r"(?:\s+(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen))?\s*[?.!,:]*$",
+    r"\b(?:sub[-\s]*topic|main\s+topic|next\s+topic|section)"
+    r"(?:\s+(?:\d+|one|two|to|too|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen))?\s*[?.!,:]*$",
     re.I,
 )
 
@@ -287,7 +306,7 @@ def _anchor(
 ) -> str | None:
     lower = text.lower()
     number = _section_number(lower)
-    if number and re.search(r"\b(subtopic|section|topic|chapter)\b",lower):
+    if number and re.search(r"\b(sub[-\s]*topic|section|topic|chapter)\b",lower):
         for b in blocks:
             if b["kind"] == "heading" and re.match(rf"^{re.escape(number)}\b",b["text"]): return b["id"]
     if "exercises for lecture" in lower:
@@ -313,7 +332,7 @@ def _anchor(
                      re.match(rf"^{digit}\.\s",b["text"])),None)
     cue_tails: list[str] = []
     if prev_cue:
-        cleaned_start = re.sub(r"^(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen)\s*[,:;.!?-]*\s*", "", lower.lstrip())
+        cleaned_start = re.sub(r"^(?:\d+|one|two|to|too|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen)\s*[,:;.!?-]*\s*", "", lower.lstrip())
         if cleaned_start:
             cue_tails.append(cleaned_start)
     for m in CUE_RE.finditer(lower):
@@ -322,8 +341,22 @@ def _anchor(
             cue_tails.append(tail)
     if cue_tails:
         explicit_back = bool(re.search(r"\b(back to|return to|earlier|previous|recall)\b", lower))
-        headings = [b for b in blocks if b["kind"] == "heading"]
-        heading_freq = Counter(t for b in headings for t in set(tokens(b["text"].split("•")[0])))
+        is_main_topic = bool(re.search(r"\bmain\s+topic\b", lower) and not re.search(r"\bsub[-\s]*topic\b", lower))
+        primary_headings = [b for b in blocks if b["kind"] == "heading"]
+        head_page_counts = Counter(tuple(sorted(set(tokens(b["text"].split("•")[0])))) for b in primary_headings)
+        headings = list(primary_headings)
+        by_page: dict[int, list[dict]] = defaultdict(list)
+        for b in blocks:
+            by_page[b["page"]].append(b)
+        for b in primary_headings:
+            key = tuple(sorted(set(tokens(b["text"].split("•")[0]))))
+            if head_page_counts[key] >= 2:
+                page_blocks = by_page[b["page"]]
+                if len(page_blocks) >= 2 and page_blocks[1]["region"][1] < .35:
+                    sub_b = page_blocks[1]
+                    if 2 <= len(tokens(sub_b["text"].split(":")[0])) <= 8:
+                        headings.append(sub_b)
+        heading_freq = Counter(t for b in primary_headings for t in set(tokens(b["text"].split("•")[0])))
         valid_matches = []
         for cue_idx, tail in enumerate(cue_tails):
             tail_toks = tokens(tail)
@@ -335,12 +368,15 @@ def _anchor(
             for b in headings:
                 raw_head = b["text"].split("•")[0]
                 sec_prefix = re.match(r"^(\d+\.\d+)\b", raw_head.strip())
-                title_variants = [set(tokens(raw_head))]
+                title_variants: list[tuple[set[str], str]] = [(set(tokens(raw_head)), "full")]
                 if ":" in raw_head:
+                    pre = {t for t in tokens(raw_head.split(":", 1)[0]) if not t.isdigit()}
+                    if len(pre) >= 2:
+                        title_variants.append((pre, "prefix"))
                     sub = {t for t in tokens(raw_head.split(":", 1)[1]) if not t.isdigit()}
-                    if len(sub) >= 2 or (len(sub) == 1 and all(heading_freq[t] == 1 for t in sub)):
-                        title_variants.append(sub)
-                for title in title_variants:
+                    if len(sub) >= 2 or (len(sub) == 1 and all(heading_freq.get(t, 1) == 1 for t in sub)):
+                        title_variants.append((sub, "suffix"))
+                for title, vkind in title_variants:
                     if not title:
                         continue
                     if sec_prefix and sec_prefix.group(1) in title and sec_prefix.group(1) not in spoken:
@@ -348,21 +384,28 @@ def _anchor(
                     overlap = title & spoken
                     if not overlap:
                         continue
-                    weight = sum(1 / math.sqrt(max(1, heading_freq[t])) for t in overlap)
+                    missing = title - spoken
+                    if missing:
+                        min_missing_freq = min(heading_freq.get(t, 1) for t in missing)
+                        min_overlap_freq = min(heading_freq.get(t, 1) for t in overlap)
+                        if min_missing_freq < min_overlap_freq and min_overlap_freq >= 3:
+                            continue
+                    first_pos = min((window.index(t) for t in overlap if t in window), default=99)
+                    if vkind == "suffix" and len(title) == 1 and is_main_topic and first_pos > 0:
+                        continue
+                    weight = sum(1 / math.sqrt(max(1, heading_freq.get(t, 1))) for t in overlap)
                     precision = len(overlap) / len(title)
                     exact_short = (
                         1 <= len(title) <= 2
                         and title.issubset(short_window)
-                        and (len(title) == 2 or heading_freq[next(iter(title))] <= 2 or (b["page"] == min_page + 1 and tail_toks[0] in title))
+                        and (len(title) == 2 or heading_freq.get(next(iter(title)), 1) <= 2 or (b["page"] == min_page + 1 and tail_toks[0] in title))
                     )
                     long_match = (
-                        len(overlap) >= 3
-                        and precision >= .68
-                        and len(overlap) / max(1, min(len(title), len(spoken))) >= .70
+                        (len(overlap) >= 3 and precision >= .65 and len(overlap) / max(1, min(len(title), len(spoken))) >= .70)
+                        or (len(overlap) >= 3 and precision >= .50 and len(overlap) / max(1, len(spoken)) >= .60 and weight >= 1.85 and min(heading_freq.get(t, 1) for t in overlap) <= 2)
                     )
                     if exact_short or long_match:
                         is_outline = bool(outline_pages and b["page"] in outline_pages and b["page"] > 3)
-                        first_pos = min((window.index(t) for t in overlap if t in window), default=99)
                         valid_matches.append({
                             "block": b,
                             "page": b["page"],
@@ -412,6 +455,17 @@ def _anchor(
                     ),
                 )
                 return best["block"]["id"]
+    step_match = re.search(r"\bstep\s+(one|two|three|four|1|2|3|4)\b", lower)
+    if step_match:
+        val = step_match.group(1)
+        digit = int(val) if val.isdigit() else NUMBER_WORDS[val]
+        spoken_toks = set(tokens(lower))
+        for b in blocks:
+            if b["kind"] == "heading" and min_page <= b["page"] <= min_page + 4 and re.match(rf"^step\s+{digit}\b", b["text"].strip(), re.I):
+                page_toks = {t for pb in blocks if pb["page"] == b["page"] for t in tokens(pb["text"])}
+                min_shared = 1 if b["page"] <= min_page + 2 else 2
+                if len((spoken_toks & page_toks) - {"step", str(digit)}) >= min_shared:
+                    return b["id"]
     return None
 
 
@@ -582,6 +636,8 @@ def align_document(
         after=set(tokens(pages[p-1].get("text","")))
         if before and after and len(before & after)/max(1,len(before | after))>.82:
             duplicate_neighbors.add(p)
+    placeholder_pages = {p["number"] for p in pages if p.get("title", "").strip().lower() == "embedded graph or diagram"}
+    skip_step_pages = duplicate_neighbors | placeholder_pages | {p for p in outline_pages if p > 3}
     upcoming_top_anchor = [None]*len(points)
     next_top = None
     for i in range(len(points)-1,-1,-1):
@@ -608,7 +664,14 @@ def align_document(
                 # explicit grounded section/exercise anchor can do that.
                 if p<q and not anchor_page:
                     options.append(-1e6);continue
-                penalty = 0 if p==q else .14+.13*max(0,p-q-1) if p>q else .08+.04*(q-p-1)
+                if p>q:
+                    skipped_dups = 0 if p in duplicate_neighbors else sum(1 for m in range(q + 1, p) if m in skip_step_pages)
+                    eff_jump = max(0, (p - q - 1) - skipped_dups)
+                    penalty = .14 + .13 * eff_jump
+                elif p==q:
+                    penalty = 0.
+                else:
+                    penalty = .08 + .04 * (q - p - 1)
                 if p>q and p in duplicate_neighbors: penalty += .35
                 if p>q and p in outline_pages and p>3 and not anchor_page: penalty += .5
                 options.append(previous[q-1]-penalty)
@@ -622,6 +685,7 @@ def align_document(
     # Repair the path forward from explicit anchors. This prevents a later
     # difficult transition from erasing an earlier, directly announced page.
     page_tokens = {p["number"]: set(tokens(p.get("text", ""))) for p in pages}
+    title_tokens = {p["number"]: set(tokens(p.get("title", ""))) for p in pages}
     last_page=1
     for i in range(len(points)):
         if anchors[i]:
@@ -634,8 +698,18 @@ def align_document(
                             pages[next_anchor-1]["blocks"][0]["kind"] in {"paragraph","equation"})
         upper=npage if next_anchor is None else max(last_page,next_anchor if continuation else next_anchor-1)
         allowed_pages = [p for p in range(last_page,upper+1) if p==last_page or not (p in outline_pages and p>3)]
-        page_scores={p:max((s[0] for s,b in zip(scores[i],blocks) if b["page"]==p),default=0.)
-                     for p in allowed_pages}
+        spoken_toks = set(tokens(points[i]["text"]))
+        page_scores={}
+        strong_title_pages=set()
+        for p in allowed_pages:
+            base = max((s[0] for s,b in zip(scores[i],blocks) if b["page"]==p),default=0.)
+            novel = spoken_toks & (page_tokens.get(p, set()) - page_tokens.get(last_page, set()))
+            title_hit = spoken_toks & (title_tokens.get(p, set()) - title_tokens.get(last_page, set()))
+            if p > last_page and len(novel) >= 3 and title_hit:
+                base += min(.14, .035 * len(novel))
+                if len(title_hit) >= 2 or len(novel) >= 4:
+                    strong_title_pages.add(p)
+            page_scores[p] = base
         page_lex={p:max((s[1] for s,b in zip(scores[i],blocks) if b["page"]==p),default=0.)
                   for p in allowed_pages}
         current_score=page_scores.get(last_page,0.)
@@ -643,11 +717,11 @@ def align_document(
         def _eff_steps(p: int) -> int:
             if p <= last_page:
                 return 0
-            skipped_outlines = sum(1 for m in range(last_page + 1, p) if m in outline_pages and m > 3)
-            return max(1, (p - last_page) - skipped_outlines)
+            skipped = sum(1 for m in range(last_page + 1, p) if m in skip_step_pages)
+            steps = max(1, (p - last_page) - skipped)
+            return min(steps, 2) if p in strong_title_pages else steps
         candidate=max(page_scores,key=lambda p:page_scores[p]-jump_cost*_eff_steps(p))
         if candidate>last_page and page_scores[candidate]-jump_cost*_eff_steps(candidate) >= current_score+.035:
-            spoken_toks = set(tokens(points[i]["text"]))
             novel_toks = spoken_toks & (page_tokens.get(candidate, set()) - page_tokens.get(last_page, set()))
             if page_lex.get(candidate, 0.) >= .20 and novel_toks:
                 last_page=candidate

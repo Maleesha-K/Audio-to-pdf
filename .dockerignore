@@ -1,0 +1,11 @@
+.venv
+.uv-cache
+__pycache__
+*.pyc
+.env
+.git
+.gitignore
+tests/
+scratch/
+data/lessons/*
+!data/lessons/sample-optimization

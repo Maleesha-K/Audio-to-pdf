@@ -126,6 +126,8 @@ class EquationFocusTest(unittest.TestCase):
     def test_data_mining_and_calculus_subterm_tracking(self):
         dm_dir = ROOT / 'data' / 'lessons' / '658ebbdb704e'
         calc_dir = ROOT / 'data' / 'lessons' / '764e94c7cee1'
+        if not calc_dir.is_dir():
+            calc_dir = ROOT / 'tests' / 'fixtures' / '764e94c7cee1'
         if dm_dir.is_dir():
             dm_lesson = json.loads((dm_dir / 'lesson.json').read_text(encoding='utf-8'))
             dm_events = build_focus(dm_lesson, dm_dir / 'source.pdf')
