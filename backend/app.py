@@ -481,14 +481,17 @@ def rebuild_alignment(lesson_id: str, background: BackgroundTasks):
     return {"id":lesson_id,"status":"processing"}
 
 
+AUDIO_MIME = {".m4a": "audio/mp4", ".mp4": "audio/mp4", ".mp3": "audio/mpeg", ".wav": "audio/wav",
+              ".ogg": "audio/ogg", ".flac": "audio/flac"}
+
+
 @app.get("/api/lessons/{lesson_id}/audio")
 def get_audio(lesson_id: str):
     lesson_dir = _lesson_dir(lesson_id)
     matches = sorted(lesson_dir.glob("audio.*"))
-    if matches:
-        return FileResponse(matches[0])
-    lesson = _load_lesson(lesson_id)
-    return FileResponse(lesson_dir / lesson["audio_file"])
+    path = matches[0] if matches else lesson_dir / _load_lesson(lesson_id)["audio_file"]
+    # Slim Linux images lack /etc/mime.types, so .m4a would otherwise be served as octet-stream.
+    return FileResponse(path, media_type=AUDIO_MIME.get(path.suffix.lower(), "application/octet-stream"))
 
 
 @app.get("/api/lessons/{lesson_id}/pages/{page_number}")
