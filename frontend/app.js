@@ -24,8 +24,17 @@ const fmt = (seconds) => `${String(Math.floor(seconds / 60)).padStart(2, "0")}:$
 const api = async (path, options) => {
   const response = await fetch(path, options);
   if (!response.ok) {
-    let detail = response.statusText;
-    try { detail = (await response.json()).detail || detail; } catch (_) {}
+    if (response.status === 413) {
+      throw new Error("File exceeds the 30 MB serverless upload limit. Please choose an audio file under 30 MB (or ~15–20 minutes).");
+    }
+    let detail = "";
+    try {
+      const err = await response.json();
+      detail = err.detail || "";
+    } catch (_) {}
+    if (!detail) {
+      detail = response.statusText || `HTTP ${response.status} Error`;
+    }
     throw new Error(detail);
   }
   return response.json();
@@ -1028,6 +1037,11 @@ $("uploadForm").addEventListener("submit", async (event) => {
   try {
     const form = new FormData($("uploadForm"));
     if (!form.get("transcript")?.size) form.delete("transcript");
+    const audioFile = form.get("audio");
+    if (audioFile && audioFile.size > 30 * 1024 * 1024) {
+      const mb = (audioFile.size / (1024 * 1024)).toFixed(1);
+      throw new Error(`Audio file is ${mb} MB. Cloud Run has a 30 MB upload limit per request. Please use a shorter lecture audio (under 30 MB / ~15–20 minutes) or compressed audio.`);
+    }
     const created = await api("/api/lessons", { method: "POST", body: form });
     closeDialog();
     $("uploadForm").reset();
