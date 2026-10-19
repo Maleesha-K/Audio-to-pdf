@@ -274,12 +274,13 @@ def health():
 def list_lessons():
     flagship_order = {
         "sample-optimization": 0,
-        "c06d6f2733cf": 1,
-        "340684620bb9": 2,
-        "39e3634e87d8": 3,
-        "9b1f46f4bacb": 4,
-        "764e94c7cee1": 5,
-        "eff13ddc461d": 6,
+        "sample-rule-mining": 1,
+        "c06d6f2733cf": 2,
+        "340684620bb9": 3,
+        "39e3634e87d8": 4,
+        "9b1f46f4bacb": 5,
+        "764e94c7cee1": 6,
+        "eff13ddc461d": 7,
     }
     archived_test_runs = {"b4cba7ab007f", "658ebbdb704e", "bc4fc246efc9", "e06c8a8cf140", "179957e3d5ba"}
     rows = []

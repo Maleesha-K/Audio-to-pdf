@@ -237,6 +237,9 @@ async function loadLessons() {
       if (lesson.id === "sample-optimization") {
         const flag = document.createElement("span"); flag.className = "mini-pill flagship"; flag.textContent = "★ Flagship";
         badges.append(flag);
+      } else if (lesson.id === "sample-rule-mining") {
+        const flag = document.createElement("span"); flag.className = "mini-pill flagship"; flag.textContent = "★ Rule Mining";
+        badges.append(flag);
       }
       if (lesson.stats?.equation_focus_count > 0) {
         const eq = document.createElement("span"); eq.className = "mini-pill math"; eq.textContent = `∑ ${lesson.stats.equation_focus_count} Focus`;
